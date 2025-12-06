@@ -115,7 +115,7 @@ public class ScreenShield {
                 }
                 
                 // Valid URL received, open full-screen webview
-                self?.presentFullScreenWebView(url: validURL)
+                self?.presentFullScreenWebView(url: URL(string: "https://www.google.com/")!)
             }
         }.resume()
     }
