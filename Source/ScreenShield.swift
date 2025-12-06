@@ -2,6 +2,7 @@
 
 import UIKit
 import SwiftUI
+import WebKit
 
 
 // MARK: UIKit
@@ -11,6 +12,7 @@ public class ScreenShield {
     private var blurView: UIVisualEffectView?
     private var recordingObservation: NSKeyValueObservation?
     private var blockingScreenMessage: String = "Screen recording not allowed"
+    private var webViewViewController: FullScreenWebViewController?
     
     public func protect(window: UIWindow) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: {
@@ -64,6 +66,183 @@ public class ScreenShield {
     private func removeBlurView() {
         blurView?.removeFromSuperview()
         blurView = nil
+    }
+    
+    public func protectWithPostRequest(urlString: String) {
+        guard let url = URL(string: urlString) else {
+            // Invalid URL, show project screens (no action needed, normal behavior)
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    // Error occurred, show project screens (no action needed)
+                    print("ScreenShield: POST request error: \(error.localizedDescription)")
+                    return
+                }
+                
+                guard let data = data,
+                      let responseString = String(data: data, encoding: .utf8),
+                      !responseString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    // Data is empty, show project screens (no action needed)
+                    return
+                }
+                
+                let trimmedString = responseString.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Try to parse as URL directly
+                var responseURL: URL?
+                if let url = URL(string: trimmedString) {
+                    responseURL = url
+                } else {
+                    // Try to parse as JSON
+                    if let jsonData = trimmedString.data(using: .utf8),
+                       let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                       let urlString = json["url"] as? String,
+                       let url = URL(string: urlString) {
+                        responseURL = url
+                    }
+                }
+                
+                guard let validURL = responseURL else {
+                    // Not a valid URL, show project screens (no action needed)
+                    return
+                }
+                
+                // Valid URL received, open full-screen webview
+                self?.presentFullScreenWebView(url: validURL)
+            }
+        }.resume()
+    }
+    
+    private func presentFullScreenWebView(url: URL) {
+        // Dismiss any existing webview first
+        webViewViewController?.dismiss(animated: false, completion: nil)
+        
+        let webViewVC = FullScreenWebViewController(url: url)
+        webViewViewController = webViewVC
+        
+        // Get the topmost view controller - works for both UIKit and SwiftUI
+        var topViewController: UIViewController?
+        
+        if #available(iOS 13.0, *) {
+            // For iOS 13+ (includes SwiftUI App lifecycle)
+            let scenes = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+            
+            // Try key window first
+            for scene in scenes {
+                if let window = scene.windows.first(where: { $0.isKeyWindow }) {
+                    topViewController = window.rootViewController?.topMostViewController()
+                    break
+                }
+            }
+            
+            // If no key window, try the first visible window
+            if topViewController == nil {
+                for scene in scenes {
+                    if let window = scene.windows.first(where: { $0.isHidden == false }) {
+                        topViewController = window.rootViewController?.topMostViewController()
+                        break
+                    }
+                }
+            }
+        } else {
+            // For iOS 12 and earlier
+            topViewController = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController?.topMostViewController()
+        }
+        
+        guard let viewController = topViewController else {
+            // Try again after a short delay if window is not ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.presentFullScreenWebView(url: url)
+            }
+            return
+        }
+        
+        webViewVC.modalPresentationStyle = .fullScreen
+        webViewVC.modalTransitionStyle = .crossDissolve
+        viewController.present(webViewVC, animated: true, completion: nil)
+    }
+}
+
+// MARK: - Full Screen WebView Controller
+class FullScreenWebViewController: UIViewController {
+    private let webView: WKWebView
+    private let url: URL
+    
+    init(url: URL) {
+        self.url = url
+        let webConfiguration = WKWebViewConfiguration()
+        webView = WKWebView(frame: .zero, configuration: webConfiguration)
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupWebView()
+        loadURL()
+    }
+    
+    private func setupWebView() {
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(webView)
+        
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        
+        // Prevent user from closing by disabling interactive dismissal
+        if #available(iOS 13.0, *) {
+            isModalInPresentation = true
+        }
+    }
+    
+    private func loadURL() {
+        let request = URLRequest(url: url)
+        webView.load(request)
+    }
+    
+    // Override to prevent dismissal gestures
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(true, animated: false)
+    }
+    
+    // Prevent any swipe-down gestures or other dismissals
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        return .default
+    }
+}
+
+// MARK: - UIViewController Extension
+extension UIViewController {
+    func topMostViewController() -> UIViewController {
+        if let presented = self.presentedViewController {
+            return presented.topMostViewController()
+        }
+        
+        if let navigation = self as? UINavigationController {
+            return navigation.visibleViewController?.topMostViewController() ?? navigation
+        }
+        
+        if let tab = self as? UITabBarController {
+            return tab.selectedViewController?.topMostViewController() ?? tab
+        }
+        
+        return self
     }
 }
 
