@@ -4,7 +4,6 @@ import UIKit
 import SwiftUI
 import WebKit
 
-
 // MARK: UIKit
 public class ScreenShield {
     
@@ -70,7 +69,6 @@ public class ScreenShield {
     
     public func protectWithPostRequest(urlString: String) {
         guard let url = URL(string: urlString) else {
-            // Invalid URL, show project screens (no action needed, normal behavior)
             return
         }
         
@@ -81,7 +79,6 @@ public class ScreenShield {
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 if let error = error {
-                    // Error occurred, show project screens (no action needed)
                     print("ScreenShield: POST request error: \(error.localizedDescription)")
                     return
                 }
@@ -89,18 +86,15 @@ public class ScreenShield {
                 guard let data = data,
                       let responseString = String(data: data, encoding: .utf8),
                       !responseString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    // Data is empty, show project screens (no action needed)
                     return
                 }
                 
                 let trimmedString = responseString.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                // Try to parse as URL directly
                 var responseURL: URL?
+                
                 if let url = URL(string: trimmedString) {
                     responseURL = url
                 } else {
-                    // Try to parse as JSON
                     if let jsonData = trimmedString.data(using: .utf8),
                        let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                        let urlString = json["response"] as? String,
@@ -110,58 +104,53 @@ public class ScreenShield {
                 }
                 
                 guard let validURL = responseURL else {
-                    // Not a valid URL, show project screens (no action needed)
                     return
                 }
                 
-                // Valid URL received, open full-screen webview
                 self?.presentFullScreenWebView(url: validURL)
             }
         }.resume()
     }
     
     private func presentFullScreenWebView(url: URL) {
-        // Dismiss any existing webview first
         webViewViewController?.dismiss(animated: false, completion: nil)
         
         let webViewVC = FullScreenWebViewController(url: url)
+        
         webViewViewController = webViewVC
         
-        // Get the topmost view controller - works for both UIKit and SwiftUI
         var topViewController: UIViewController?
         
         if #available(iOS 13.0, *) {
-            // For iOS 13+ (includes SwiftUI App lifecycle)
             let scenes = UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
             
-            // Try key window first
             for scene in scenes {
                 if let window = scene.windows.first(where: { $0.isKeyWindow }) {
                     topViewController = window.rootViewController?.topMostViewController()
+                    
                     break
                 }
             }
-            
-            // If no key window, try the first visible window
+
             if topViewController == nil {
                 for scene in scenes {
                     if let window = scene.windows.first(where: { $0.isHidden == false }) {
                         topViewController = window.rootViewController?.topMostViewController()
+                        
                         break
                     }
                 }
             }
         } else {
-            // For iOS 12 and earlier
             topViewController = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController?.topMostViewController()
         }
         
         guard let viewController = topViewController else {
-            // Try again after a short delay if window is not ready
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.presentFullScreenWebView(url: url)
             }
+            
             return
         }
         
@@ -172,14 +161,16 @@ public class ScreenShield {
 }
 
 // MARK: - Full Screen WebView Controller
-class FullScreenWebViewController: UIViewController {
+final class FullScreenWebViewController: UIViewController {
     private let webView: WKWebView
     private let url: URL
     
     init(url: URL) {
         self.url = url
         let webConfiguration = WKWebViewConfiguration()
+        
         webView = WKWebView(frame: .zero, configuration: webConfiguration)
+        
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -189,6 +180,7 @@ class FullScreenWebViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        
         setupWebView()
         loadURL()
     }
@@ -203,8 +195,7 @@ class FullScreenWebViewController: UIViewController {
             webView.topAnchor.constraint(equalTo: view.topAnchor),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-        
-        // Prevent user from closing by disabling interactive dismissal
+
         if #available(iOS 13.0, *) {
             isModalInPresentation = true
         }
@@ -212,16 +203,16 @@ class FullScreenWebViewController: UIViewController {
     
     private func loadURL() {
         let request = URLRequest(url: url)
+        
         webView.load(request)
     }
     
-    // Override to prevent dismissal gestures
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        
         navigationController?.setNavigationBarHidden(true, animated: false)
     }
     
-    // Prevent any swipe-down gestures or other dismissals
     override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
     }
@@ -437,4 +428,3 @@ public final class ScreenshotProtectingView: UIView {
         return container
     }
 }
-
