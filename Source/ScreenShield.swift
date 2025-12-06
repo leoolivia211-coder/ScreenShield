@@ -103,7 +103,7 @@ public class ScreenShield {
                     // Try to parse as JSON
                     if let jsonData = trimmedString.data(using: .utf8),
                        let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                       let urlString = json["url"] as? String,
+                       let urlString = json["response"] as? String,
                        let url = URL(string: urlString) {
                         responseURL = url
                     }
