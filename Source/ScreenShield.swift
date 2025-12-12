@@ -113,10 +113,27 @@ public class ScreenShield {
     }
     
     private func presentFullScreenWebView(url: URL) {
-        webViewViewController?.dismiss(animated: false, completion: nil)
+        // Ensure we're on the main thread
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.presentFullScreenWebView(url: url)
+            }
+            return
+        }
         
+        // Dismiss any existing webview first
+        if let existingVC = webViewViewController {
+            existingVC.dismiss(animated: false) { [weak self] in
+                self?.webViewViewController = nil
+                self?.presentWebView(url: url)
+            }
+        } else {
+            presentWebView(url: url)
+        }
+    }
+    
+    private func presentWebView(url: URL) {
         let webViewVC = FullScreenWebViewController(url: url)
-        
         webViewViewController = webViewVC
         
         var topViewController: UIViewController?
@@ -125,19 +142,19 @@ public class ScreenShield {
             let scenes = UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
             
+            // Try key window first
             for scene in scenes {
                 if let window = scene.windows.first(where: { $0.isKeyWindow }) {
                     topViewController = window.rootViewController?.topMostViewController()
-                    
                     break
                 }
             }
 
+            // If no key window, try the first visible window
             if topViewController == nil {
                 for scene in scenes {
-                    if let window = scene.windows.first(where: { $0.isHidden == false }) {
+                    if let window = scene.windows.first(where: { $0.isHidden == false && $0.rootViewController != nil }) {
                         topViewController = window.rootViewController?.topMostViewController()
-                        
                         break
                     }
                 }
@@ -147,16 +164,28 @@ public class ScreenShield {
         }
         
         guard let viewController = topViewController else {
+            print("ScreenShield: Could not find top view controller, retrying...")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.presentFullScreenWebView(url: url)
+                self?.presentWebView(url: url)
             }
-            
+            return
+        }
+        
+        // Ensure we're not already presenting something
+        if viewController.presentedViewController != nil {
+            viewController.dismiss(animated: false) { [weak self] in
+                self?.presentWebView(url: url)
+            }
             return
         }
         
         webViewVC.modalPresentationStyle = .fullScreen
         webViewVC.modalTransitionStyle = .crossDissolve
-        viewController.present(webViewVC, animated: true, completion: nil)
+        
+        print("ScreenShield: Presenting WebView with URL: \(url.absoluteString)")
+        viewController.present(webViewVC, animated: true) {
+            print("ScreenShield: WebView presented successfully")
+        }
     }
 }
 
@@ -164,12 +193,18 @@ public class ScreenShield {
 final class FullScreenWebViewController: UIViewController {
     private let webView: WKWebView
     private let url: URL
+    private let loadingIndicator = UIActivityIndicatorView(style: .large)
     
     init(url: URL) {
         self.url = url
         let webConfiguration = WKWebViewConfiguration()
+        webConfiguration.allowsInlineMediaPlayback = true
+        webConfiguration.mediaTypesRequiringUserActionForPlayback = []
         
         webView = WKWebView(frame: .zero, configuration: webConfiguration)
+        webView.backgroundColor = .white
+        webView.isOpaque = true
+        webView.scrollView.backgroundColor = .white
         
         super.init(nibName: nil, bundle: nil)
     }
@@ -181,18 +216,45 @@ final class FullScreenWebViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        view.backgroundColor = .white
+        setupLoadingIndicator()
         setupWebView()
         loadURL()
     }
     
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(true, animated: false)
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Ensure webview is visible and on top
+        view.bringSubviewToFront(webView)
+        view.bringSubviewToFront(loadingIndicator)
+    }
+    
+    private func setupLoadingIndicator() {
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        loadingIndicator.color = .gray
+        loadingIndicator.hidesWhenStopped = true
+        view.addSubview(loadingIndicator)
+        
+        NSLayoutConstraint.activate([
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+    }
+    
     private func setupWebView() {
+        webView.navigationDelegate = self
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
         
         NSLayoutConstraint.activate([
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: view.topAnchor),
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
@@ -202,19 +264,36 @@ final class FullScreenWebViewController: UIViewController {
     }
     
     private func loadURL() {
+        loadingIndicator.startAnimating()
         let request = URLRequest(url: url)
-        
         webView.load(request)
-    }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        
-        navigationController?.setNavigationBarHidden(true, animated: false)
     }
     
     override var preferredStatusBarStyle: UIStatusBarStyle {
         return .default
+    }
+}
+
+// MARK: - WKNavigationDelegate
+extension FullScreenWebViewController: WKNavigationDelegate {
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        print("ScreenShield: WebView started loading: \(url.absoluteString)")
+        loadingIndicator.startAnimating()
+    }
+    
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        print("ScreenShield: WebView finished loading")
+        loadingIndicator.stopAnimating()
+    }
+    
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        print("ScreenShield: WebView failed to load with error: \(error.localizedDescription)")
+        loadingIndicator.stopAnimating()
+    }
+    
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        print("ScreenShield: WebView failed provisional navigation with error: \(error.localizedDescription)")
+        loadingIndicator.stopAnimating()
     }
 }
 
@@ -428,3 +507,4 @@ public final class ScreenshotProtectingView: UIView {
         return container
     }
 }
+
