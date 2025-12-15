@@ -189,11 +189,12 @@ final class FullScreenWebViewController: UIViewController {
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
         
+        let guide = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: view.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            webView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: guide.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: guide.bottomAnchor)
         ])
 
         if #available(iOS 13.0, *) {
