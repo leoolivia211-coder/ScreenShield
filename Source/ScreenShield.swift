@@ -6,7 +6,6 @@ import WebKit
 
 // MARK: UIKit
 public class ScreenShield {
-    
     public static let shared = ScreenShield()
     private var blurView: UIVisualEffectView?
     private var recordingObservation: NSKeyValueObservation?
@@ -113,6 +112,23 @@ public class ScreenShield {
     }
     
     private func presentFullScreenWebView(url: URL) {
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+            guard let self = self else { return }
+            
+            if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
+                DispatchQueue.main.async {
+                    self.presentWebViewController(url: url)
+                }
+            } else {
+                print("ScreenShield: Invalid URL: \(url). Status code: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            }
+        }.resume()
+    }
+    
+    private func presentWebViewController(url: URL) {
         webViewViewController?.dismiss(animated: false, completion: nil)
         
         let webViewVC = FullScreenWebViewController(url: url)
@@ -148,7 +164,7 @@ public class ScreenShield {
         
         guard let viewController = topViewController else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.presentFullScreenWebView(url: url)
+                self?.presentWebViewController(url: url)
             }
             
             return
@@ -430,4 +446,3 @@ public final class ScreenshotProtectingView: UIView {
         return container
     }
 }
-
